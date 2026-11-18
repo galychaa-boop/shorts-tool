@@ -1,1 +1,276 @@
 
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SHORTS TOOL</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#080b0a;color:#f4f7f5;
+ font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;
+ padding:22px 16px;
+}
+header{margin:12px 0 28px}
+.logo{font-size:27px;font-weight:900;letter-spacing:2px}
+.logo span{color:#35d58b}
+.sub{color:#89948e;font-size:13px;margin-top:6px}
+.card{
+ background:#111715;border:1px solid #26342d;
+ border-radius:17px;padding:17px;margin-bottom:16px;
+}
+h2{font-size:17px;margin:0 0 16px}
+label{display:block;color:#a8b3ad;font-size:13px;margin:14px 0 8px}
+input,select{
+ width:100%;padding:14px;border-radius:11px;
+ border:1px solid #344139;background:#090e0c;
+ color:white;font-size:15px;outline:none;
+}
+button{
+ width:100%;padding:15px;border:0;border-radius:12px;
+ background:#29c77d;color:#06150d;font-weight:800;
+ font-size:15px;margin-top:16px;
+}
+button:disabled{opacity:.5}
+.secondary{background:#202a24;color:white}
+.status{color:#35d58b;font-size:13px;margin-top:12px}
+.results{display:flex;flex-direction:column;gap:12px}
+.video{
+ display:flex;gap:12px;background:#151c18;
+ border:1px solid #29352e;border-radius:13px;padding:10px;
+}
+.video img{width:112px;height:80px;object-fit:cover;border-radius:8px}
+.info{min-width:0;flex:1}
+.title{font-size:13px;font-weight:700;line-height:1.4}
+.meta{font-size:12px;color:#9ca9a1;margin-top:7px}
+.info a{color:#35d58b;font-size:12px;display:inline-block;margin-top:7px}
+.small{color:#859189;font-size:12px;line-height:1.5}
+.top{display:flex;justify-content:space-between;align-items:center}
+.count{color:#35d58b;font-weight:800}
+</style>
+</head>
+<body>
+<header>
+ <div class="logo">SHORTS<span> TOOL</span></div>
+ <div class="sub">YOUTUBE VIDEO FINDER · YOUR CONTENT WORKSPACE</div>
+</header>
+
+<div class="card">
+ <h2>01 / Налаштування пошуку</h2>
+ <label>YouTube API Key</label>
+ <input id="api" type="password" placeholder="Встав API ключ">
+ <p class="small">Ключ зберігається тільки в цьому браузері. Не публікуй його та обмеж його використання в Google Cloud.</p>
+
+ <label>Посилання на YouTube канал</label>
+ <input id="channel" placeholder="https://youtube.com/@channel">
+
+ <label>Мінімум переглядів</label>
+ <input id="views" type="number" value="100000">
+
+ <label>Кількість результатів</label>
+ <select id="limit">
+  <option value="10">10 відео</option>
+  <option value="20">20 відео</option>
+  <option value="50" selected>50 відео</option>
+  <option value="100">100 відео</option>
+ </select>
+
+ <label>Максимальна тривалість</label>
+ <select id="duration">
+  <option value="60">До 60 секунд</option>
+  <option value="180" selected>До 3 хвилин</option>
+  <option value="600">До 10 хвилин</option>
+ </select>
+
+ <button id="search" onclick="startSearch()">ЗНАЙТИ ВІДЕО →</button>
+ <div id="status" class="status">Очікування пошуку...</div>
+</div>
+
+<div class="card">
+ <div class="top">
+  <h2>02 / Результати</h2>
+  <span class="count" id="total">0</span>
+ </div>
+ <div id="results" class="results">
+  <p class="small">Тут з'являться знайдені відео.</p>
+ </div>
+ <button class="secondary" onclick="exportLinks()">ЕКСПОРТ ПОСИЛАНЬ ↓</button>
+</div>
+
+<script>
+const apiInput=document.getElementById('api');
+apiInput.value=localStorage.getItem('yt_api')||'';
+apiInput.addEventListener('change',()=>{
+ localStorage.setItem('yt_api',apiInput.value.trim());
+});
+
+let found=[];
+
+function setStatus(t){
+ document.getElementById('status').textContent=t;
+}
+
+async function getJSON(url){
+ const r=await fetch(url);
+ const data=await r.json();
+ if(!r.ok || data.error) throw new Error(data.error?.message||'API error');
+ return data;
+}
+
+function parseChannel(input){
+ const s=input.trim();
+ const m=s.match(/youtube\.com\/channel\/(UC[\w-]+)/i);
+ if(m)return {id:m[1]};
+ const h=s.match(/youtube\.com\/@([^/?]+)/i);
+ if(h)return {handle:h[1]};
+ const u=s.match(/youtube\.com\/user\/([^/?]+)/i);
+ if(u)return {username:u[1]};
+ if(/^UC[\w-]+$/.test(s))return {id:s};
+ if(s.startsWith('@'))return {handle:s.slice(1)};
+ throw new Error('Не вдалося розпізнати посилання на канал.');
+}
+
+async function startSearch(){
+ const btn=document.getElementById('search');
+ const key=apiInput.value.trim();
+ const channel=document.getElementById('channel').value.trim();
+ const minViews=Number(document.getElementById('views').value)||0;
+ const limit=Number(document.getElementById('limit').value);
+ const maxDuration=Number(document.getElementById('duration').value);
+
+ if(!key || !channel){
+  setStatus('Введи API ключ та посилання на канал.');
+  return;
+ }
+
+ btn.disabled=true;
+ found=[];
+ document.getElementById('results').innerHTML='';
+ document.getElementById('total').textContent='0';
+
+ try{
+  setStatus('Знаходимо канал...');
+
+  const parsed=parseChannel(channel);
+  let channelUrl='https://www.googleapis.com/youtube/v3/channels?part=contentDetails&key='+encodeURIComponent(key);
+
+  if(parsed.id)channelUrl+='&id='+encodeURIComponent(parsed.id);
+  else if(parsed.handle)channelUrl+='&forHandle='+encodeURIComponent(parsed.handle);
+  else channelUrl+='&forUsername='+encodeURIComponent(parsed.username);
+
+  const channelData=await getJSON(channelUrl);
+  if(!channelData.items?.length)throw new Error('Канал не знайдений.');
+
+  const uploads=channelData.items[0].contentDetails.relatedPlaylists.uploads;
+  let ids=[],token='';
+
+  while(ids.length<300){
+   setStatus('Збираємо список відео: '+ids.length);
+   let url='https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=50&playlistId='+uploads+'&key='+encodeURIComponent(key);
+   if(token)url+='&pageToken='+encodeURIComponent(token);
+
+   const data=await getJSON(url);
+   ids.push(...data.items.map(x=>x.contentDetails.videoId));
+   token=data.nextPageToken||'';
+   if(!token)break;
+  }
+
+  let videos=[];
+
+  for(let i=0;i<ids.length;i+=50){
+   setStatus('Отримуємо статистику: '+Math.min(i+50,ids.length)+'/'+ids.length);
+   const batch=ids.slice(i,i+50).join(',');
+   const url='https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id='+batch+'&key='+encodeURIComponent(key);
+   const data=await getJSON(url);
+   videos.push(...data.items);
+  }
+
+  found=videos.filter(v=>{
+   const views=Number(v.statistics.viewCount||0);
+   const seconds=durationSeconds(v.contentDetails.duration);
+   return views>=minViews && seconds<=maxDuration;
+  }).sort((a,b)=>Number(b.statistics.viewCount)-Number(a.statistics.viewCount)).slice(0,limit);
+
+  render();
+  setStatus('Готово! Знайдено '+found.length+' відео.');
+
+ }catch(e){
+  setStatus('Помилка: '+e.message);
+ }finally{
+  btn.disabled=false;
+ }
+}
+
+function durationSeconds(d){
+ const m=d.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+ return m?Number(m[1]||0)*3600+Number(m[2]||0)*60+Number(m[3]||0):0;
+}
+
+function formatDuration(d){
+ const s=durationSeconds(d);
+ return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+}
+
+function render(){
+ const box=document.getElementById('results');
+ document.getElementById('total').textContent=found.length;
+ box.innerHTML='';
+
+ if(!found.length){
+  box.innerHTML='<p class="small">За цими критеріями відео не знайдено.</p>';
+  return;
+ }
+
+ found.forEach(v=>{
+  const id=v.id;
+  const views=Number(v.statistics.viewCount||0).toLocaleString('uk-UA');
+  const img=v.snippet.thumbnails.medium?.url||v.snippet.thumbnails.default.url;
+  const el=document.createElement('div');
+  el.className='video';
+
+  const image=document.createElement('img');
+  image.src=img;
+  image.alt='Video thumbnail';
+
+  const info=document.createElement('div');
+  info.className='info';
+
+  const title=document.createElement('div');
+  title.className='title';
+  title.textContent=v.snippet.title;
+
+  const meta=document.createElement('div');
+  meta.className='meta';
+  meta.textContent=views+' переглядів · '+formatDuration(v.contentDetails.duration);
+
+  const link=document.createElement('a');
+  link.href='https://www.youtube.com/watch?v='+id;
+  link.target='_blank';
+  link.rel='noopener';
+  link.textContent='ВІДКРИТИ НА YOUTUBE ↗';
+
+  info.append(title,meta,link);
+  el.append(image,info);
+  box.append(el);
+ });
+}
+
+function exportLinks(){
+ if(!found.length){
+  setStatus('Спочатку знайди відео.');
+  return;
+ }
+ const text=found.map(v=>'https://www.youtube.com/watch?v='+v.id).join('\n');
+ const blob=new Blob([text],{type:'text/plain'});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');
+ a.href=url;
+ a.download='shorts-links.txt';
+ a.click();
+ URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
+
